@@ -24,3 +24,4 @@ dataset_vlsu
 *.log
 *.jsonl
 generations.json
+dataset_hades

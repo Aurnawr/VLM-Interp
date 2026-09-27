@@ -26,8 +26,8 @@ from tqdm import tqdm
 # generation is saved so the scorer can be checked by hand.
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(SCRIPT_DIR)
-sys.path.insert(0, os.path.join(REPO_ROOT, "Experiment-1-scripts"))
+REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))  # scripts live in old_project_scripts/<exp>/
+sys.path.insert(0, os.path.join(os.path.dirname(SCRIPT_DIR), "Experiment-1-scripts"))
 from pca_plots_llava import load_data, IMAGE_WRAPPER_TEXT  # noqa: E402
 
 MODELS = {

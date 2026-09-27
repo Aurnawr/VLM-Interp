@@ -13,7 +13,7 @@ from pca_plots_llava import load_data, IMAGE_WRAPPER_TEXT
 # (29 layers incl. embeddings, hidden_dim 3584).
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(SCRIPT_DIR)
+REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))  # scripts live in old_project_scripts/<exp>/
 MODEL_ID = "Qwen/Qwen2.5-VL-7B-Instruct"
 CACHE_PATH = os.path.join(REPO_ROOT, "qwen-results", "hidden_states_qwen.npz")
 

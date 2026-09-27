@@ -14,8 +14,8 @@ from tqdm import tqdm
 # because of the image, the text, or only their combination.
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(SCRIPT_DIR)
-sys.path.insert(0, os.path.join(REPO_ROOT, "Experiment-2-scripts"))
+REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))  # scripts live in old_project_scripts/<exp>/
+sys.path.insert(0, os.path.join(os.path.dirname(SCRIPT_DIR), "Experiment-2-scripts"))
 from steer_cross_modal import MODELS, is_refusal, generate_batch  # noqa: E402
 
 CELLS = ["SS", "HS", "SH", "HH"]

@@ -4,7 +4,9 @@ import numpy as np
 import matplotlib.pyplot as plt
 
 # Hidden states cached by tsne_plots_llava.py: [num_samples, num_layers, hidden_dim] per condition
-CACHE_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "hidden_states_llava.npz")
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+OUT_DIR = os.path.join(REPO_ROOT, "llava-results")
+CACHE_PATH = os.path.join(OUT_DIR, "hidden_states_llava.npz")
 
 def main():
     if not os.path.exists(CACHE_PATH):
@@ -40,7 +42,7 @@ def main():
     layers = np.arange(num_layers)
 
     # Ensure plots directory or save locally
-    output_dir = "."
+    output_dir = OUT_DIR
 
     # Plot norms
     plt.figure()

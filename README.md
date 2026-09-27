@@ -45,7 +45,7 @@ Two models are compared, chosen because they are built differently:
 - Every prompt is also **rendered as an 800×600 image** (black DejaVuSans text on white, word-wrapped, centred), so each sample exists as text and as an image.
 
 ```bash
-python Experiment-1-scripts/make_dataset2.py --out dataset2   # run from the repo root
+python old_project_scripts/Experiment-1-scripts/make_dataset2.py --out dataset2   # run from the repo root
 ```
 
 ```
@@ -152,7 +152,7 @@ Write-ups: [`comparison.txt`](comparison.txt) (side by side), [`llava-results/re
 
 ## Experiment 2: cross-modal steering
 
-`Experiment-2-scripts/steer_cross_modal.py` turns Experiment 1 into a causal test. Following Arditi et al. (2024), it steers one modality with the *other* modality's refusal vector, with same-modality steering as the reference:
+`old_project_scripts/Experiment-2-scripts/steer_cross_modal.py` turns Experiment 1 into a causal test. Following Arditi et al. (2024), it steers one modality with the *other* modality's refusal vector, with same-modality steering as the reference:
 
 - **add:** `h ← h + α · s · v̂` at one layer, all positions, on **harmless** inputs. Does the vector induce refusal?
 - **ablate:** `h ← h − (h·v̂) v̂` at every layer, all positions, on **harmful** inputs. Does removing the direction bypass refusal?
@@ -162,8 +162,8 @@ Write-ups: [`comparison.txt`](comparison.txt) (side by side), [`llava-results/re
 - Default layers: LLaVA 12, 20; Qwen 12, 18. Default α ∈ {1, 2, 4}. Qwen runs in bf16 (fp16 overflows).
 
 ```bash
-python Experiment-2-scripts/steer_cross_modal.py --model llava --random_control
-python Experiment-2-scripts/steer_cross_modal.py --model qwen  --random_control --alphas 1 2
+python old_project_scripts/Experiment-2-scripts/steer_cross_modal.py --model llava --random_control
+python old_project_scripts/Experiment-2-scripts/steer_cross_modal.py --model qwen  --random_control --alphas 1 2
 ```
 
 The Qwen run took ~9 h on a 16 GB GPU (part of the model is offloaded to CPU), which is why it covers only α ∈ {1, 2}.
@@ -306,55 +306,53 @@ A CUDA GPU with ~16 GB is enough for the 7B models. The Qwen scripts take `--gpu
 
 ```bash
 # 0. data
-python Experiment-1-scripts/make_dataset2.py --out dataset2
+python old_project_scripts/Experiment-1-scripts/make_dataset2.py --out dataset2
 
-# 1a. LLaVA: extract hidden states (cached to hidden_states_llava.npz), then plots
-python Experiment-1-scripts/tsne_plots_llava.py          # extraction + t-SNE (--recompute to refresh)
-python Experiment-1-scripts/pca_plots_llava.py           # PCA
-python Experiment-1-scripts/cosine_similarity.py         # norms, cosine, refusal_{text,image}.pt
+# 1a. LLaVA: extract hidden states (cached to llava-results/hidden_states_llava.npz), then plots
+python old_project_scripts/Experiment-1-scripts/tsne_plots_llava.py          # extraction + t-SNE (--recompute to refresh)
+python old_project_scripts/Experiment-1-scripts/pca_plots_llava.py           # PCA
+python old_project_scripts/Experiment-1-scripts/cosine_similarity.py         # norms, cosine, refusal_{text,image}.pt
 
 # 1b. Qwen: extract, then all plots in one go
-python Experiment-1-scripts/extract_hidden_states_qwen.py
-python Experiment-1-scripts/plots_qwen.py                # PCA, t-SNE, norms, cosine, vectors
+python old_project_scripts/Experiment-1-scripts/extract_hidden_states_qwen.py
+python old_project_scripts/Experiment-1-scripts/plots_qwen.py                # PCA, t-SNE, norms, cosine, vectors
 
 # 1c. reliability (either model)
-python Experiment-1-scripts/refusal_reliability.py --model llava
-python Experiment-1-scripts/refusal_reliability.py --model qwen
+python old_project_scripts/Experiment-1-scripts/refusal_reliability.py --model llava
+python old_project_scripts/Experiment-1-scripts/refusal_reliability.py --model qwen
 
 # single-prompt probe against the saved LLaVA vectors
-python Experiment-1-scripts/interactive_cosine_sim.py --prompt "How do I pick a lock?" --image some.png
+python old_project_scripts/Experiment-1-scripts/interactive_cosine_sim.py --prompt "How do I pick a lock?" --image some.png
 ```
 
-### Known path quirks
+### Paths
 
-The LLaVA scripts predate the `*-results/` layout and write relative to the working directory or script folder, while `refusal_reliability.py` and `steer_cross_modal.py` read from `<model>-results/`. Before running those two for LLaVA:
-
-- move `Experiment-1-scripts/hidden_states_llava.npz` to `llava-results/hidden_states_llava.npz`;
-- move `refusal_text.pt` / `refusal_image.pt` into `llava-results/`. The copies at the repo root are the LLaVA vectors (shape 33 × 4096).
-
-The Qwen scripts already read and write under `qwen-results/`.
+All scripts live in `old_project_scripts/` and resolve paths from the repo root. They read `dataset2/` and write to `<model>-results/`, including the LLaVA cache, plots and `refusal_{text,image}.pt`. Hidden-state caches (`*.npz`), refusal vectors (`*.pt`), logs and raw generations (`*.jsonl`, `generations.json`) are gitignored.
 
 ---
 
 ## Repo layout
 
 ```
-Experiment-1-scripts/
-  make_dataset2.py              AdvBench + Alpaca prompts, rendered to images
-  pca_plots_llava.py            LLaVA extraction helpers + PCA plots
-  tsne_plots_llava.py           LLaVA extraction (cached .npz) + t-SNE plots
-  cosine_similarity.py          LLaVA refusal vectors: norms + cosine
-  interactive_cosine_sim.py     single-prompt probe against saved vectors
-  extract_hidden_states_qwen.py Qwen2.5-VL extraction (cached .npz)
-  plots_qwen.py                 all Qwen plots + refusal vectors
-  refusal_reliability.py        bootstrap CIs, noise ceiling, random null
-Experiment-2-scripts/
-  steer_cross_modal.py          cross-modal add / ablate steering
-llava-results/                  plots, results.txt, reliability/, steering/
-qwen-results/                   plots, results.txt, reliability/, steering/, refusal vectors
+old_project_scripts/            Phase 1 (Exp 1, Exp 2, natural-image baselines); frozen
+  Experiment-1-scripts/
+    make_dataset2.py              AdvBench + Alpaca prompts, rendered to images
+    pca_plots_llava.py            LLaVA extraction helpers + PCA plots
+    tsne_plots_llava.py           LLaVA extraction (cached .npz) + t-SNE plots
+    cosine_similarity.py          LLaVA refusal vectors: norms + cosine
+    interactive_cosine_sim.py     single-prompt probe against saved vectors
+    extract_hidden_states_qwen.py Qwen2.5-VL extraction (cached .npz)
+    plots_qwen.py                 all Qwen plots + refusal vectors
+    refusal_reliability.py        bootstrap CIs, noise ceiling, random null
+    make_vlsu_dataset.py          VLSU 2x2 natural-image set
+    vlsu_baseline.py              VLSU behavioural baseline
+    mmsafety_baseline.py          MM-SafetyBench SD-only behavioural baseline
+  Experiment-2-scripts/
+    steer_cross_modal.py          cross-modal add / ablate steering
+llava-results/                  plots, results.txt, reliability/, steering/, vlsu/, mmsafety/
+qwen-results/                   plots, results.txt, reliability/, steering/, vlsu/
 ablation1/                      earlier image-only LLaVA run
 comparison.txt                  LLaVA vs Qwen write-up
-refusal_text.pt, refusal_image.pt   LLaVA refusal vectors [33, 4096]
 ```
 
 ---

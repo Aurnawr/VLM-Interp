@@ -13,3 +13,14 @@ new_project_scripts/dataset2/
 __pycache__/
 project_scripts/hidden_states_llava.npz
 dataset_vlsu
+
+# cached hidden states (~1.5 GB)
+*.npz
+
+# never commit: vectors/weights, logs, raw generations
+*.pt
+*.pth
+*.safetensors
+*.log
+*.jsonl
+generations.json

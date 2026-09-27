@@ -10,7 +10,7 @@ from sklearn.manifold import TSNE
 # extract_hidden_states_qwen.py: PCA, t-SNE, refusal-vector norms, text-vs-image
 # cosine, and the refusal vectors themselves. Outputs go to qwen-results/.
 
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 OUT_DIR = os.path.join(REPO_ROOT, "qwen-results")
 CACHE_PATH = os.path.join(OUT_DIR, "hidden_states_qwen.npz")
 MODEL_NAME = "Qwen2.5-VL-7B"

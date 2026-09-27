@@ -79,7 +79,8 @@ def main():
     num_samples = 400 # Limit to 40 samples per class to keep it fast/avoid OOM for demonstration
     print(f"Loading subset of data ({num_samples} samples per class)...")
     
-    data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "dataset2")
+    repo_root = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+    data_dir = os.path.join(repo_root, "dataset2")
 
     harmful_json = os.path.join(data_dir, "harmful.json")
     harmful_dir = os.path.join(data_dir, "harmful_images")
@@ -103,7 +104,7 @@ def main():
     
     num_layers = hs_harmful_text.shape[1]
     
-    output_dir = "pca_plots"
+    output_dir = os.path.join(repo_root, "llava-results", "pca_plots")
     os.makedirs(output_dir, exist_ok=True)
     
     # 6 evenly spaced layers from the embedding layer to the final layer

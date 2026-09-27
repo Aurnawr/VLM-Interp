@@ -10,8 +10,8 @@ from transformers import AutoProcessor, LlavaForConditionalGeneration
 from pca_plots_llava import load_data, get_hidden_states_text, get_hidden_states_image
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(SCRIPT_DIR)
-CACHE_PATH = os.path.join(SCRIPT_DIR, "hidden_states_llava.npz")
+REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))  # scripts live in old_project_scripts/<exp>/
+CACHE_PATH = os.path.join(REPO_ROOT, "llava-results", "hidden_states_llava.npz")
 
 def extract_hidden_states(num_samples):
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -77,7 +77,7 @@ def main():
 
     num_layers = hs_harmful_text.shape[1]
 
-    output_dir = "tsne_plots"
+    output_dir = os.path.join(REPO_ROOT, "llava-results", "tsne_plots")
     os.makedirs(output_dir, exist_ok=True)
 
     # Same layers as the PCA plots so the two can be compared side by side

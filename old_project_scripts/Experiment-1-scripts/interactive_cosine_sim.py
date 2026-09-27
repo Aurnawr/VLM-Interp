@@ -10,8 +10,8 @@ def main():
     parser = argparse.ArgumentParser(description="Calculate cosine similarity of a prompt with refusal vectors.")
     parser.add_argument("--prompt", type=str, required=True, help="The text prompt to feed into the model.")
     parser.add_argument("--image", type=str, default=None, help="Optional image path to include in the prompt.")
-    parser.add_argument("--refusal-text", type=str, default="refusal_text.pt", help="Path to text refusal vector.")
-    parser.add_argument("--refusal-image", type=str, default="refusal_image.pt", help="Path to image refusal vector.")
+    parser.add_argument("--refusal-text", type=str, default="llava-results/refusal_text.pt", help="Path to text refusal vector.")
+    parser.add_argument("--refusal-image", type=str, default="llava-results/refusal_image.pt", help="Path to image refusal vector.")
     parser.add_argument("--output", type=str, default="interactive_cosine_sim.png", help="Output plot filename.")
     
     args = parser.parse_args()

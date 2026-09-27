@@ -23,8 +23,8 @@ from tqdm import tqdm
 # request can be complied with by innocently misreading the image.
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
-REPO_ROOT = os.path.dirname(SCRIPT_DIR)
-sys.path.insert(0, os.path.join(REPO_ROOT, "Experiment-2-scripts"))
+REPO_ROOT = os.path.dirname(os.path.dirname(SCRIPT_DIR))  # scripts live in old_project_scripts/<exp>/
+sys.path.insert(0, os.path.join(os.path.dirname(SCRIPT_DIR), "Experiment-2-scripts"))
 from steer_cross_modal import MODELS, is_refusal, generate_batch  # noqa: E402
 
 HF_REPO = "PKU-Alignment/MM-SafetyBench"

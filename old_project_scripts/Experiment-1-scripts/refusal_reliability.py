@@ -10,7 +10,7 @@ import matplotlib.pyplot as plt
 # Row i of every condition corresponds to prompt i (images are renderings of the
 # same prompts), so text and image are always resampled / split with shared indices.
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # Cache for model m lives at <m>-results/hidden_states_<m>.npz; outputs go to <m>-results/reliability/
 MODEL_NAMES = {"llava": "LLaVA-1.5-7B", "qwen": "Qwen2.5-VL-7B"}
 

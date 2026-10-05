@@ -36,3 +36,22 @@ What would change my mind:
 | CLIP baseline AUROC | | |
 | Final-token probe, peak | | |
 | Projection onto `v_text`, best layer | | |
+
+## Outcome (added after the run, 2026-10-05; the sections above are unchanged)
+
+| Number | LLaVA-1.5-7B | Qwen2.5-VL-7B | vs prediction |
+|---|---|---|---|
+| CLIP baseline AUROC (CLS) | 0.951 | 0.951 | inside 0.90–0.97 |
+| Final-token probe, peak | 0.947 (L32) | 0.955 (L28) | inside range; ≈ CLIP as predicted |
+| Projection onto `v_text`, best layer | 0.870 (L17) | 0.874 (L20) | above both predicted ranges |
+| Random-direction null, same layer | 0.761 | 0.824 | not anticipated |
+
+The projection AUROC miss is mostly a missing null: random directions alone reach 0.76–0.84,
+so projection AUROC is a weak alignment measure here. On cosine and gap size, the pattern is "aligned
+but too weak": cos(v_text, v_img) 0.35 (LLaVA) / 0.63 (Qwen); unsafe images move ≤ 8% / ≤ 16%
+of the text harmful-harmless gap along v_text; 0% / ≤ 27% of unsafe images pass the text threshold.
+"Would change my mind" conditions: the first (probe well below CLIP) did not occur. The second
+(projection ≥ 0.85 with near-zero refusals → gate threshold problem) was met at face value
+(0.87 in both models), but much of that AUROC is explained by the random-direction null. The cosine
+and gap numbers point the same way, though: a partly aligned but small shift that stays below the
+text threshold, which is a threshold/strength problem rather than a direction that is absent.

@@ -32,7 +32,7 @@ def keep_mask():
         for i in range(j):
             if keep[i] and S[i, j] > NEAR_DUP_COS:
                 keep[j] = False
-                dropped.append((i, j, float(S[i, j])))
+                dropped.append((int(i), int(j), float(S[i, j])))
                 break
     return keep, dropped
 

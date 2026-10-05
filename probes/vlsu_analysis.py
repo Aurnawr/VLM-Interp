@@ -25,7 +25,7 @@ INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e4e3df"
 C_PROBE, C_PROJ, C_CLIP, C_PATCH = "#2a78d6", "#eb6834", "#1baf7a", "#eda100"
 
 
-def projection_stats(H1, H0, v_text, t_mid, n_boot, rng):
+def projection_stats(H1, H0, v_text, t_mid, n_boot, rng, n_random=200):
     """Per-layer AUROC of the projection onto v_text_hat, with CI and text-threshold statistics."""
     y = np.r_[np.ones(len(H1)), np.zeros(len(H0))].astype(int)
     out = {}
@@ -35,8 +35,16 @@ def projection_stats(H1, H0, v_text, t_mid, n_boot, rng):
         a = auroc(torch.as_tensor(s)[None], torch.as_tensor(y, dtype=torch.float64)[None]).item()
         ci, _ = bootstrap_ci(s - np.median(s), y, n_boot, rng)
         text_gap = t_mid[l]["harmful"] - t_mid[l]["harmless"]
+        # Random-direction null: AUROC of projections onto random unit vectors, two-sided (max(a, 1 - a))
+        R = rng.standard_normal((n_random, H1.shape[2]))
+        R /= np.linalg.norm(R, axis=1, keepdims=True)
+        Sr = np.r_[H1[:, l], H0[:, l]] @ R.T
+        ar = auroc(torch.as_tensor(Sr.T), torch.as_tensor(np.tile(y, (n_random, 1)), dtype=torch.float64)).numpy()
         out[str(l)] = {
             "auroc": a, "auroc_ci": ci.tolist(),
+            "random_null_95": float(np.percentile(np.maximum(ar, 1 - ar), 95)),
+            "cos_vtext_vimg": float(vhat @ (H1[:, l].mean(0) - H0[:, l].mean(0))
+                                    / np.linalg.norm(H1[:, l].mean(0) - H0[:, l].mean(0))),
             "unsafe_past_text_threshold": float((s[y == 1] > t_mid[l]["thr"]).mean()),
             "safe_past_text_threshold": float((s[y == 0] > t_mid[l]["thr"]).mean()),
             "gap_frac_of_text_gap": float((s[y == 1].mean() - s[y == 0].mean()) / text_gap),
@@ -87,6 +95,8 @@ def plot(probe, proj, clip, model, path):
                         color=color, alpha=0.2, lw=0)
     nulls = [probe["image"][str(l)]["null_auroc_95"] for l in layers]
     ax.plot(layers, nulls, color=MUTED, lw=1.5, ls=":", label="probe shuffle null, 95th pct")
+    ax.plot(layers, [proj[str(l)]["random_null_95"] for l in layers], color=MUTED, lw=1.5, ls="-.",
+            label="projection random-direction null, 95th pct")
     ax.axhline(clip["clip_cls"]["auroc"], color=C_CLIP, lw=1.5, ls="--", label="CLIP CLS embedding (vision encoder only)")
     ax.axhline(clip["clip_patch"]["auroc"], color=C_PATCH, lw=1.5, ls="--",
                label="CLIP layer -2 patch mean (LLaVA projector input)")
@@ -141,17 +151,21 @@ def main():
              f"   shuffle null 95th pct      {max(probe['image'][str(l)]['null_auroc_95'] for l in layers):.3f} (max over layers)",
              f"3. Projection onto text refusal direction v_text (no training)",
              f"   best layer ({jk:2d})           {f(proj[str(jk)])}",
-             f"   last layer ({L:2d})            {f(proj[str(L)])}", "",
+             f"   last layer ({L:2d})            {f(proj[str(L)])}",
+             f"   random-direction null      {max(proj[str(l)]['random_null_95'] for l in layers):.3f} "
+             f"(95th pct of max(AUROC, 1-AUROC) over 200 random unit directions; max over layers)", "",
              "Per layer: probe AUROC | projection AUROC | share of unsafe / safe images past the text threshold |",
              "image class gap along v_text as a fraction of the text class gap | mean unsafe / safe image position",
-             "(0 = harmless-text mean, 1 = harmful-text mean)",
+             "(0 = harmless-text mean, 1 = harmful-text mean) | projection random-direction null (95th pct) |",
+             "cosine between v_text and the VLSU image class-mean difference (unsafe - safe images)",
              f"{'layer':>5}  {'probe':>22}  {'projection':>22}  {'unsafe>thr':>10}  {'safe>thr':>8}  {'gap frac':>8}  "
-             f"{'unsafe pos':>10}  {'safe pos':>8}"]
+             f"{'unsafe pos':>10}  {'safe pos':>8}  {'rand null':>9}  {'cos(v_text, v_img)':>18}"]
     for l in layers:
         p, q = probe["image"][str(l)], proj[str(l)]
         lines.append(f"{l:>5}  {f(p):>22}  {f(q):>22}  {q['unsafe_past_text_threshold']:>10.3f}  "
                      f"{q['safe_past_text_threshold']:>8.3f}  {q['gap_frac_of_text_gap']:>8.3f}  "
-                     f"{q['unsafe_mean_pos']:>10.2f}  {q['safe_mean_pos']:>8.2f}")
+                     f"{q['unsafe_mean_pos']:>10.2f}  {q['safe_mean_pos']:>8.2f}  {q['random_null_95']:>9.3f}  "
+                     f"{q['cos_vtext_vimg']:>18.3f}")
     with open(os.path.join(out_dir, "vlsu_table.txt"), "w") as fh:
         fh.write("\n".join(lines) + "\n")
     with open(os.path.join(out_dir, "vlsu_results.json"), "w") as fh:
@@ -159,7 +173,7 @@ def main():
                    "n_unsafe": info["n_unsafe"], "n_safe": info["n_safe"], "near_duplicates_dropped": info["dropped"]},
                   fh, indent=1)
     plot(probe, proj, clip, args.model, os.path.join(out_dir, "vlsu_auroc.png"))
-    print("\n".join(lines[:15]))
+    print("\n".join(lines[:16]))
     print(f"Saved to {out_dir}")
 
 

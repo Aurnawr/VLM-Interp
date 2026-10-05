@@ -27,12 +27,13 @@ Two models are compared, chosen because they are built differently:
 | Random null (95th pct) | 0.03 | 0.03 |
 | Image / text refusal-vector norm | 2–9× weaker at every layer | Equal from layer ~19 on |
 | Modality gap in PCA | Persists to layer 32 | Gone by layer ~22 |
+| Harmful vs harmless images, linear probe AUROC (5-fold CV) | **0.99–1.00** at every layer | **0.99–1.00** at every layer |
 | Image lands on its own text twin (last layer) | 6% harmless / 14% harmful | 98% harmless / 74% harmful |
 | Refuses harmful typographic images (Exp. 2 baseline) | **0%** genuine | **98%** |
 | Image vec added to harmless text → refusal | never (≤0.07) | 0.98 (L18, α=1) |
 | Text vec ablated from harmful images → refusal | n/a (no baseline refusal) | 0.98 → **0.00** (L18) |
 
-- **LLaVA** keeps images and text apart. The image harmfulness signal is weaker, appears later, and only partly aligns with the text refusal direction. This fits the idea that text-trained refusal does not fully transfer to images. Causally, the text direction can push images into refusal, but the image direction does nothing to text, and LLaVA never genuinely refuses a harmful typographic image.
+- **LLaVA** keeps images and text apart. Its image harm vector is weaker and only partly aligns with the text refusal direction, even though a linear probe still separates harmful from harmless images almost perfectly (whether by harm or by AdvBench/Alpaca style is not yet tested). This fits the idea that text-trained refusal does not fully transfer to images. Causally, the text direction can push images into refusal, but the image direction does nothing to text, and LLaVA never genuinely refuses a harmful typographic image.
 - **Qwen** folds images into the same representation as text by about two-thirds depth: same direction, same strength, no modality gap. The transition is sharp at layer 13 → 14. Causally, at layer 18 the two directions work in both directions: either one induces refusal in either modality, and removing the *text* direction fully removes refusal of harmful images. At layer 12 (before the transition, cos 0.34) the image direction does nothing.
 - **Main caveat:** all images are *typographic* (the prompt rendered as text). Qwen's convergence may mean "strong OCR reads the image into text", not "harm is represented modality-independently". The per-prompt image-to-text-twin result points toward the OCR reading. Natural harmful images are needed to separate the two.
 
@@ -133,14 +134,36 @@ For each image: is its nearest text point (of all 800) the text of the same prom
 
 Qwen's convergence is per-prompt, not only class-level, and weaker for harmful prompts than harmless ones.
 
-#### Held-out linear separability of harmful vs harmless
+#### Linear probe: is harmful vs harmless decodable from the last token?
 
-Mean-difference direction fit on even-indexed prompts, tested on odd-indexed ones.
+[`probes/linear_probe.py`](probes/linear_probe.py), on the cached last-token states (prompts 0–399 per class, layers 1 to last; layer 0 is constant).
 
-- **LLaVA image:** 0.68–0.86 in layers 1–4, 0.88–0.96 from layer 6 on (text: 0.92–0.98).
-- **Qwen image:** 0.83–0.85 in layers 1–4, 0.94–0.98 in layers 6–12, 0.99–1.00 from layer 14 on (text: 0.93–1.00).
+- **Probe:** L2 logistic regression on z-scored features, fit on the GPU (checked against sklearn: weight cosine 1.0000).
+- **Evaluation:** 5-fold stratified CV, with the L2 strength picked by an inner 3-fold CV on each training fold. The same folds are used for text and image (row *i* is the same prompt). Accuracy uses the probe's own p = 0.5 threshold, fit on the training fold.
+- **Uncertainty:** 95% CIs from a stratified bootstrap (1000) over out-of-fold scores, with the trained probes held fixed.
+- **Null:** 100 label shuffles, each run through the full pipeline including the inner CV.
+- **Reference:** the old ad hoc number, a mean-difference direction with a midpoint threshold, fit on even prompts and tested on odd ones.
 
-So LLaVA's image harm signal is not absent. It is weaker and points in a different direction from the text signal. PCA under-sells it because the modality gap takes up the top components.
+| | LLaVA-1.5-7B | Qwen2.5-VL-7B |
+|---|---|---|
+| Image AUROC [95% CI] | 0.992 [0.986, 0.996] at L1, ≥ 0.996 from L2 on | 0.994 [0.989, 0.998] at L1, ≥ 0.996 from L2 on |
+| Image accuracy | 0.967–0.996 | 0.980–0.999 |
+| Text AUROC | ≥ 0.997 | ≥ 0.998 |
+| Shuffle null AUROC (95th pct) | 0.53–0.55 | 0.53–0.56 |
+| Shuffle p-value | < 0.01 at every layer (the floor for 100 shuffles) | < 0.01 at every layer |
+| Old even/odd mean-difference accuracy, image | 0.68–0.86 (L1–4), 0.88–0.97 (L5+) | 0.83–0.89 (L1–5), 0.94–0.99 (L6–13), 0.99–1.00 (L14+) |
+| Old even/odd mean-difference accuracy, text | 0.92–0.98 | 0.92–1.00 |
+
+| LLaVA-1.5-7B | Qwen2.5-VL-7B |
+|---|---|
+| ![](llava-results/probe/probe_auroc.png) | ![](qwen-results/probe/probe_auroc.png) |
+
+- **The mean-difference number undersold the signal.** It ignores how features co-vary, so it was a lower bound. With the probe, LLaVA's images are as decodable as its text, and as Qwen's images, from layer 1 on. Qwen's early climb (0.83 → 0.99) came from the mean-difference method, not from the representation.
+- **The models differ in direction and strength, not decodability.** LLaVA's image harm vector is weaker and points elsewhere than `v_text` (cosine and norms above), but the harmful/harmless distinction is linearly present in both models. PCA undersells it because the modality gap takes up the top components.
+- **Near-ceiling from layer 1 is a warning sign.** After a single layer the last token has barely processed the image, yet image AUROC is already 0.99. AdvBench and Alpaca differ in length (12.0 ± 2.8 vs 10.2 ± 4.4 words), phrasing (imperatives such as "Write…", "Develop…" vs mixed questions and tasks) and topic. Rendered as images, they also differ in layout. A probe at the ceiling cannot show whether it reads harm or these cues. That needs a surface-feature baseline (a classifier on the raw prompt strings) and a style-matched harmful/harmless test set.
+- **Minor biases.** AUROC pools out-of-fold scores from all 5 folds, and each fold's probe has its own scale, so AUROC sits slightly below accuracy in places (e.g. Qwen image L20: 0.996 vs 0.998). Per-fold AUROC would only be higher. The chosen L2 strength varies across folds (1e-4 to 10) because validation AUROC is at the ceiling for every value.
+
+Full per-layer tables: [`llava-results/probe/probe_table.txt`](llava-results/probe/probe_table.txt), [`qwen-results/probe/probe_table.txt`](qwen-results/probe/probe_table.txt) (raw values in `probe_results.json`).
 
 Write-ups: [`comparison.txt`](comparison.txt) (side by side), [`llava-results/results.txt`](llava-results/results.txt), [`qwen-results/results.txt`](qwen-results/results.txt).
 
@@ -321,13 +344,17 @@ python old_project_scripts/Experiment-1-scripts/plots_qwen.py                # P
 python old_project_scripts/Experiment-1-scripts/refusal_reliability.py --model llava
 python old_project_scripts/Experiment-1-scripts/refusal_reliability.py --model qwen
 
+# 1d. harmful vs harmless linear probe with CV, bootstrap CIs and label-shuffle null (GPU, ~30 min per model)
+python probes/linear_probe.py --model llava
+python probes/linear_probe.py --model qwen
+
 # single-prompt probe against the saved LLaVA vectors
 python old_project_scripts/Experiment-1-scripts/interactive_cosine_sim.py --prompt "How do I pick a lock?" --image some.png
 ```
 
 ### Paths
 
-All scripts live in `old_project_scripts/` and resolve paths from the repo root. They read `dataset2/` and write to `<model>-results/`, including the LLaVA cache, plots and `refusal_{text,image}.pt`. Hidden-state caches (`*.npz`), refusal vectors (`*.pt`), logs and raw generations (`*.jsonl`, `generations.json`) are gitignored.
+Phase 1 scripts live in `old_project_scripts/`; new analysis scripts live in `probes/` and write to `<model>-results/probe/`. All resolve paths from the repo root. They read `dataset2/` and write to `<model>-results/`, including the LLaVA cache, plots and `refusal_{text,image}.pt`. Hidden-state caches (`*.npz`), refusal vectors (`*.pt`), logs and raw generations (`*.jsonl`, `generations.json`) are gitignored.
 
 ---
 
@@ -349,8 +376,10 @@ old_project_scripts/            Phase 1 (Exp 1, Exp 2, natural-image baselines);
     mmsafety_baseline.py          MM-SafetyBench SD-only behavioural baseline
   Experiment-2-scripts/
     steer_cross_modal.py          cross-modal add / ablate steering
-llava-results/                  plots, results.txt, reliability/, steering/, vlsu/, mmsafety/
-qwen-results/                   plots, results.txt, reliability/, steering/, vlsu/
+probes/
+  linear_probe.py               harmful vs harmless logistic probe: nested CV, bootstrap CIs, shuffle null
+llava-results/                  plots, results.txt, reliability/, probe/, steering/, vlsu/, mmsafety/
+qwen-results/                   plots, results.txt, reliability/, probe/, steering/, vlsu/
 ablation1/                      earlier image-only LLaVA run
 comparison.txt                  LLaVA vs Qwen write-up
 ```
@@ -360,16 +389,18 @@ comparison.txt                  LLaVA vs Qwen write-up
 ## Caveats and next steps
 
 - **Typographic images only.** Test with natural harmful images to tell "OCR works well" apart from "modality-general harm concept".
-- **Refusal vs style confound.** AdvBench and Alpaca differ in style and length, not only harmfulness. A stable mean-difference direction is not proof that it is *the* refusal direction. A label-shuffle null is still missing.
+- **Refusal vs style confound.** AdvBench and Alpaca differ in style and length, not only harmfulness. A stable mean-difference direction is not proof that it is *the* refusal direction, and the near-ceiling probe AUROC (even at layer 1) may reflect style rather than harm. The probe now has a label-shuffle null; a surface-feature baseline and a style-matched test set are still missing.
 - **Steering coverage.** Qwen was run at α ∈ {1, 2} only (LLaVA also has α=4), at two layers per model, with greedy decoding and 64 new tokens.
 - **Refusal scorer.** The substring scorer confuses "can't read the image" (LLaVA) and soft "As an AI I don't have…" hedges (Qwen) with refusal. It misses degenerate output and "this is unethical, but here is how…" moralising compliance. The "genuine" / "harm-framed" counts in the README are ad-hoc regexes. It needs an exclusion list or an LLM judge.
-- **Ad-hoc numbers.** The relative-norm, held-out separability, outlier-dimension and image-to-text-twin figures were computed ad hoc from the cached hidden states. No committed script produces them yet.
+- **Ad-hoc numbers.** The relative-norm, outlier-dimension and image-to-text-twin figures were computed ad hoc from the cached hidden states. No committed script produces them yet. (Held-out separability is now scripted in `probes/linear_probe.py`.)
 
 - [x] Run Experiment 2 on LLaVA
 - [x] Run Experiment 2 on Qwen (α ∈ {1, 2})
 - [ ] Qwen α=4, and more layers (e.g. 14–16, around the transition)
 - [ ] Better refusal scorer (separate "can't read the image" and soft hedges, flag degenerate output and moralising compliance)
-- [ ] Label-shuffle null
+- [x] Linear probe with CV, bootstrap CIs and label-shuffle null (`probes/linear_probe.py`)
+- [ ] Label-shuffle null for the cosine / norm analyses
+- [ ] Surface-feature baseline and style-matched harmful/harmless set for the probe
 - [ ] Natural (non-typographic) harmful images
 - [ ] Script the ad-hoc analyses
 - [ ] Unify LLaVA output paths under `llava-results/`

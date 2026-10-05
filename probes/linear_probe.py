@@ -150,8 +150,9 @@ def run_layer(X, y, fold, n_shuffle, n_boot, rng, iters, device):
         md[te] = meandiff_scores(Xd, yt, ~te, te)
     md_acc = ((md > 0).long() == yt).double().mean().item()
     md_auc = auroc(md[None], yt[None].double()).item()
-    # Row i (harmful) and row 400+i (harmless) come from prompt index i in their own set
-    even = torch.as_tensor(np.tile(np.arange(n // 2) % 2 == 0, 2), device=device)
+    # Harmful rows first, then harmless; even/odd = position within each class (prompt index for dataset2)
+    n1 = int(y.sum())
+    even = torch.as_tensor(np.r_[np.arange(n1) % 2 == 0, np.arange(n - n1) % 2 == 0], device=device)
     eo = meandiff_scores(Xd, yt, even, ~even)
     eo_acc = ((eo > 0).long() == yt[~even]).double().mean().item()
 
@@ -169,21 +170,22 @@ def run_layer(X, y, fold, n_shuffle, n_boot, rng, iters, device):
     }
 
 
-def plot(results, model, path):
-    layers = sorted(int(l) for l in results["text"])
+def plot(results, title, path):
+    mods = list(results)
+    layers = sorted(int(l) for l in results[mods[0]])
     fig, axes = plt.subplots(1, 2, figsize=(11, 4.2), sharey=True)
     for ax, (key, lo_key, ylabel) in zip(axes, [("auroc", "auroc_ci", "AUROC"), ("acc", "acc_ci", "Accuracy")]):
-        for m in MODALITIES:
+        for m in mods:
             r = [results[m][str(l)] for l in layers]
             ax.plot(layers, [x[key] for x in r], color=COLORS[m], lw=2, label=f"{m} probe")
             ax.fill_between(layers, [x[lo_key][0] for x in r], [x[lo_key][1] for x in r],
                             color=COLORS[m], alpha=0.2, lw=0)
         if key == "auroc":
             ax.plot(layers, [results["image"][str(l)]["meandiff_evenodd_acc"] for l in layers],
-                    color=COLORS["image"], lw=1.5, ls=":", label="image, old even/odd mean-diff (acc)")
+                    color=COLORS["image"], lw=1.5, ls=":", label="image, even/odd mean-diff (acc)")
         null_key = "null_auroc_95" if key == "auroc" else "null_acc_95"
-        nulls = [max(results[m][str(l)][null_key] for m in MODALITIES) for l in layers
-                 if results["text"][str(l)][null_key] is not None]
+        nulls = [max(results[m][str(l)][null_key] for m in mods) for l in layers
+                 if results[mods[0]][str(l)][null_key] is not None]
         if nulls:
             ax.plot(layers, nulls, color=MUTED, lw=1.5, ls="--", label="shuffle null, 95th pct")
         ax.axhline(0.5, color=GRID, lw=1, zorder=0)
@@ -196,23 +198,21 @@ def plot(results, model, path):
             ax.spines[s].set_color(MUTED)
         ax.tick_params(colors=MUTED)
         ax.legend(frameon=False, fontsize=8, loc="lower right")
-    fig.suptitle(f"{MODEL_NAMES[model]}: harmful vs harmless linear probe, last token "
-                 f"(5-fold CV, 95% bootstrap CI)", color=INK)
+    fig.suptitle(title, color=INK)
     fig.tight_layout()
     fig.savefig(path, dpi=150)
     plt.close(fig)
 
 
-def write_table(results, model, args, path):
-    lines = [f"{MODEL_NAMES[model]}  dataset2 prompts 0-{args.n_per_class - 1} (n={args.n_per_class} per class)  "
-             f"last-token states",
+def write_table(results, header, args, path):
+    lines = [header,
              f"probe = L2 logistic regression, z-scored features, {args.k}-fold stratified CV, lambda from inner 3-fold CV "
              f"over {LAMBDAS}",
              f"CI = stratified bootstrap ({args.n_boot}) over out-of-fold scores; null = {args.n_shuffle} label shuffles "
              f"through the same pipeline; p = shuffle p-value",
              "md5 = mean-difference direction + midpoint threshold on the same folds; "
              "eo = same on the original even/odd split (old Table 1 number)", ""]
-    for m in MODALITIES:
+    for m in results:
         lines.append(f"[{m}]")
         lines.append(f"{'layer':>5}  {'AUROC [95% CI]':>22}  {'acc [95% CI]':>22}  {'null95 AUROC':>12}  "
                      f"{'p':>6}  {'md5 acc':>7}  {'eo acc':>6}  lambda")
@@ -232,6 +232,8 @@ def write_table(results, model, args, path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--model", choices=sorted(MODEL_NAMES), default="llava")
+    parser.add_argument("--dataset", choices=["dataset2", "vlsu"], default="dataset2",
+                        help="vlsu = unsafe vs safe natural images under one prompt (extract_vlsu.py), image only")
     parser.add_argument("--layers", type=int, nargs="+", default=None,
                         help="Default: every layer except 0 (constant template token)")
     parser.add_argument("--k", type=int, default=5)
@@ -242,14 +244,23 @@ def main():
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
-    out_dir = os.path.join(ROOT, f"{args.model}-results", "probe")
+    if args.dataset == "vlsu":
+        from vlsu_data import load_vlsu
+        H1, H0, _ = load_vlsu(args.model)
+        data = {"image": (H1, H0)}
+        out_dir = os.path.join(ROOT, f"{args.model}-results", "vlsu_probe")
+        header = (f"{MODEL_NAMES[args.model]}  VLSU natural images, one shared prompt: unsafe images (HS+HH, "
+                  f"n={len(H1)}) vs safe images (SS+SH, n={len(H0)}), near-duplicates removed; last-token states")
+    else:
+        cache = np.load(os.path.join(ROOT, f"{args.model}-results", f"hidden_states_{args.model}.npz"))
+        data = {m: (cache[f"harmful_{m}"], cache[f"harmless_{m}"]) for m in MODALITIES}
+        out_dir = os.path.join(ROOT, f"{args.model}-results", "probe")
+        n = len(data["text"][0])
+        header = f"{MODEL_NAMES[args.model]}  dataset2 prompts 0-{n - 1} (n={n} per class)  last-token states"
     os.makedirs(out_dir, exist_ok=True)
-    cache = np.load(os.path.join(ROOT, f"{args.model}-results", f"hidden_states_{args.model}.npz"))
 
     results = {}
-    for m in MODALITIES:
-        H1, H0 = cache[f"harmful_{m}"], cache[f"harmless_{m}"]
-        args.n_per_class = len(H1)
+    for m, (H1, H0) in data.items():
         y = np.r_[np.ones(len(H1)), np.zeros(len(H0))].astype(int)
         # Same folds for both modalities: row i is the same prompt in text and image
         fold = stratified_folds(y, args.k, np.random.default_rng(args.seed))
@@ -266,8 +277,10 @@ def main():
 
     with open(os.path.join(out_dir, "probe_results.json"), "w") as f:
         json.dump({"args": vars(args), "lambdas": LAMBDAS, "results": results}, f, indent=1)
-    write_table(results, args.model, args, os.path.join(out_dir, "probe_table.txt"))
-    plot(results, args.model, os.path.join(out_dir, "probe_auroc.png"))
+    write_table(results, header, args, os.path.join(out_dir, "probe_table.txt"))
+    data_name = "VLSU natural images" if args.dataset == "vlsu" else "dataset2"
+    plot(results, f"{MODEL_NAMES[args.model]}, {data_name}: harmful vs harmless linear probe, last token "
+                  f"(5-fold CV, 95% bootstrap CI)", os.path.join(out_dir, "probe_auroc.png"))
     print(f"Saved to {out_dir}")
 
 

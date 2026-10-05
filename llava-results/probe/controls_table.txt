@@ -1,0 +1,50 @@
+LLaVA-1.5-7B  style controls for the harmful-vs-harmless probe  (dataset2 prompts 0-399, same 5 outer folds as probe_table.txt)
+
+Matched-pair AUROC: AUROC over (harmful, harmless) pairs that share the cue only. 95% CI = stratified
+bootstrap (1000) over prompts. Baselines never see the VLM; they are the same for both models.
+
+Conditions (pairs compared / harmful prompts used / harmless prompts used):
+  all                all pairs (ordinary AUROC)  (160000 / 400 / 400)
+  no_question        harmless prompts ending in '?' dropped (no harmful prompt is a question)  (138400 / 400 / 346)
+  first_word         same first word  (6273 / 286 / 188)
+  length             same word count  (12396 / 400 / 370)
+  lines              same number of rendered lines in the image  (61355 / 400 / 399)
+  first_word_length  same first word and word count within 2  (2639 / 267 / 174)
+
+1a. Surface baselines (out-of-fold, same folds)
+  baseline                       all           no_question            first_word                length                 lines     first_word_length
+  length        0.688 [0.650,0.728]  0.672 [0.633,0.714]  0.626 [0.543,0.700]  0.534 [0.484,0.587]  0.614 [0.571,0.653]  0.510 [0.432,0.594]
+  first_word    0.885 [0.863,0.908]  0.868 [0.843,0.894]  0.378 [0.310,0.444]  0.876 [0.846,0.905]  0.876 [0.850,0.902]  0.378 [0.304,0.452]
+  format        0.826 [0.797,0.854]  0.799 [0.766,0.830]  0.736 [0.664,0.800]  0.717 [0.671,0.762]  0.791 [0.756,0.825]  0.673 [0.603,0.741]
+  tfidf         0.996 [0.991,0.999]  0.995 [0.990,0.998]  0.987 [0.967,0.998]  0.996 [0.991,0.999]  0.996 [0.992,0.999]  0.986 [0.962,1.000]
+  layout        0.709 [0.671,0.744]  0.697 [0.659,0.735]  0.697 [0.623,0.762]  0.566 [0.513,0.617]  0.675 [0.631,0.716]  0.622 [0.542,0.705]
+  pixels        0.759 [0.726,0.794]  0.758 [0.723,0.794]  0.742 [0.680,0.805]  0.693 [0.650,0.738]  0.744 [0.705,0.781]  0.709 [0.639,0.776]
+    length: word + character count
+    first_word: first word only (one-hot)
+    format: length, mean word length, '?', commas, digits, quotes, colons, rendered lines
+    tfidf: bag of words + bigrams (TF-IDF): an ideal OCR reader with no understanding
+    layout: image layout: ink fraction, line count, text bounding box
+    pixels: 40x30 grayscale thumbnail of the rendered image
+
+1b. Probe, matched-pair AUROC [95% CI] at selected layers (every layer in controls_results.json)
+[text]
+  layer                   all           no_question            first_word                length                 lines     first_word_length
+      1  0.999 [0.997,1.000]  0.999 [0.997,1.000]  0.997 [0.990,1.000]  0.998 [0.996,1.000]  0.999 [0.997,1.000]  0.995 [0.984,1.000]
+      2  1.000 [0.999,1.000]  1.000 [0.999,1.000]  0.999 [0.997,1.000]  1.000 [0.999,1.000]  1.000 [0.999,1.000]  0.998 [0.995,1.000]
+      4  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]
+      8  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]
+     16  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]
+     24  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]
+     32  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]  1.000 [1.000,1.000]
+    min                 0.999                 0.999                 0.997                 0.998                 0.999                 0.995
+
+[image]
+  layer                   all           no_question            first_word                length                 lines     first_word_length
+      1  0.993 [0.988,0.997]  0.992 [0.987,0.997]  0.991 [0.981,0.997]  0.991 [0.984,0.996]  0.995 [0.991,0.998]  0.988 [0.974,0.997]
+      2  0.998 [0.996,0.999]  0.997 [0.995,0.999]  0.997 [0.992,1.000]  0.997 [0.995,0.999]  0.999 [0.997,1.000]  0.997 [0.990,1.000]
+      4  0.996 [0.993,0.999]  0.996 [0.992,0.999]  0.997 [0.993,1.000]  0.996 [0.989,0.999]  0.997 [0.994,1.000]  0.997 [0.992,1.000]
+      8  0.998 [0.997,0.999]  0.998 [0.996,0.999]  0.996 [0.991,0.999]  0.998 [0.996,1.000]  0.998 [0.997,0.999]  0.995 [0.988,1.000]
+     16  1.000 [0.999,1.000]  0.999 [0.999,1.000]  1.000 [0.999,1.000]  0.999 [0.998,1.000]  1.000 [0.999,1.000]  1.000 [1.000,1.000]
+     24  1.000 [1.000,1.000]  1.000 [0.999,1.000]  1.000 [0.999,1.000]  1.000 [0.999,1.000]  1.000 [0.999,1.000]  1.000 [1.000,1.000]
+     32  0.999 [0.999,1.000]  0.999 [0.999,1.000]  0.999 [0.997,1.000]  0.999 [0.997,1.000]  0.999 [0.998,1.000]  0.998 [0.995,1.000]
+    min                 0.993                 0.992                 0.991                 0.991                 0.995                 0.988

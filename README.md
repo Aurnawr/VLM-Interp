@@ -28,12 +28,14 @@ Two models are compared, chosen because they are built differently:
 | Image / text refusal-vector norm | 2–9× weaker at every layer | Equal from layer ~19 on |
 | Modality gap in PCA | Persists to layer 32 | Gone by layer ~22 |
 | Harmful vs harmless images, linear probe AUROC (5-fold CV) | **0.99–1.00** at every layer | **0.99–1.00** at every layer |
+| Same, only pairs sharing first word and length (style matched) | ≥ 0.988 | ≥ 0.987 |
+| Bag-of-words on the prompt string, no model (lexical baseline) | 0.996 | 0.996 |
 | Image lands on its own text twin (last layer) | 6% harmless / 14% harmful | 98% harmless / 74% harmful |
 | Refuses harmful typographic images (Exp. 2 baseline) | **0%** genuine | **98%** |
 | Image vec added to harmless text → refusal | never (≤0.07) | 0.98 (L18, α=1) |
 | Text vec ablated from harmful images → refusal | n/a (no baseline refusal) | 0.98 → **0.00** (L18) |
 
-- **LLaVA** keeps images and text apart. Its image harm vector is weaker and only partly aligns with the text refusal direction, even though a linear probe still separates harmful from harmless images almost perfectly (whether by harm or by AdvBench/Alpaca style is not yet tested). This fits the idea that text-trained refusal does not fully transfer to images. Causally, the text direction can push images into refusal, but the image direction does nothing to text, and LLaVA never genuinely refuses a harmful typographic image.
+- **LLaVA** keeps images and text apart. Its image harm vector is weaker and only partly aligns with the text refusal direction, even though a linear probe still separates harmful from harmless images almost perfectly. Controls show the probe does not lean on style (first word, length, layout), but a bag-of-words classifier is just as accurate, so on this dataset harm cannot be told apart from the prompt's words. This fits the idea that text-trained refusal does not fully transfer to images. Causally, the text direction can push images into refusal, but the image direction does nothing to text, and LLaVA never genuinely refuses a harmful typographic image.
 - **Qwen** folds images into the same representation as text by about two-thirds depth: same direction, same strength, no modality gap. The transition is sharp at layer 13 → 14. Causally, at layer 18 the two directions work in both directions: either one induces refusal in either modality, and removing the *text* direction fully removes refusal of harmful images. At layer 12 (before the transition, cos 0.34) the image direction does nothing.
 - **Main caveat:** all images are *typographic* (the prompt rendered as text). Qwen's convergence may mean "strong OCR reads the image into text", not "harm is represented modality-independently". The per-prompt image-to-text-twin result points toward the OCR reading. Natural harmful images are needed to separate the two.
 
@@ -160,10 +162,47 @@ Qwen's convergence is per-prompt, not only class-level, and weaker for harmful p
 
 - **The mean-difference number undersold the signal.** It ignores how features co-vary, so it was a lower bound. With the probe, LLaVA's images are as decodable as its text, and as Qwen's images, from layer 1 on. Qwen's early climb (0.83 → 0.99) came from the mean-difference method, not from the representation.
 - **The models differ in direction and strength, not decodability.** LLaVA's image harm vector is weaker and points elsewhere than `v_text` (cosine and norms above), but the harmful/harmless distinction is linearly present in both models. PCA undersells it because the modality gap takes up the top components.
-- **Near-ceiling from layer 1 is a warning sign.** After a single layer the last token has barely processed the image, yet image AUROC is already 0.99. AdvBench and Alpaca differ in length (12.0 ± 2.8 vs 10.2 ± 4.4 words), phrasing (imperatives such as "Write…", "Develop…" vs mixed questions and tasks) and topic. Rendered as images, they also differ in layout. A probe at the ceiling cannot show whether it reads harm or these cues. That needs a surface-feature baseline (a classifier on the raw prompt strings) and a style-matched harmful/harmless test set.
+- **Near-ceiling from layer 1 is a warning sign.** After a single layer the last token has barely processed the image, yet image AUROC is already 0.99. AdvBench and Alpaca differ in length (12.0 ± 2.8 vs 10.2 ± 4.4 words), phrasing (imperatives such as "Write…", "Develop…" vs mixed questions and tasks) and topic. Rendered as images, they also differ in layout. A probe at the ceiling cannot show whether it reads harm or these cues. The controls below test this.
 - **Minor biases.** AUROC pools out-of-fold scores from all 5 folds, and each fold's probe has its own scale, so AUROC sits slightly below accuracy in places (e.g. Qwen image L20: 0.996 vs 0.998). Per-fold AUROC would only be higher. The chosen L2 strength varies across folds (1e-4 to 10) because validation AUROC is at the ceiling for every value.
 
 Full per-layer tables: [`llava-results/probe/probe_table.txt`](llava-results/probe/probe_table.txt), [`qwen-results/probe/probe_table.txt`](qwen-results/probe/probe_table.txt) (raw values in `probe_results.json`).
+
+#### Probe controls: style vs words
+
+[`probes/controls.py`](probes/controls.py). These controls ask whether the probe reads harm or something that coincides with harm in dataset2.
+
+- **1a. Surface baselines.** Classifiers that never see the VLM, on the probe's 5 outer folds (C from an inner 3-fold CV):
+  - word and character count
+  - first word only
+  - format features (length, mean word length, "?", commas, digits, quotes, colons, rendered line count)
+  - bag of words + bigrams (TF-IDF): an ideal OCR reader with no understanding
+  - image layout (ink fraction, line count, text bounding box)
+  - a 40×30 grayscale thumbnail of the rendered image
+- **1b. Matched-pair AUROC.** AUROC is the share of (harmful, harmless) pairs ranked correctly. Here it is computed only over pairs that share a style cue, using the probe's out-of-fold scores. A probe that relies on the cue drops once the cue is equal within every compared pair. The baselines are scored the same way. CIs come from a stratified bootstrap (1000) over prompts.
+
+| Pairs compared (pairs / harmful / harmless prompts used) | Length baseline | Format baseline | Bag-of-words baseline | LLaVA probe, text / image (min over layers) | Qwen probe, text / image (min over layers) |
+|---|---|---|---|---|---|
+| All (160,000 / 400 / 400) | 0.69 | 0.83 | **0.996** | 0.999 / 0.993 | 0.998 / 0.993 |
+| Harmless questions dropped (138,400 / 400 / 346) | 0.67 | 0.80 | 0.995 | 0.999 / 0.992 | 0.997 / 0.992 |
+| Same first word (6,273 / 286 / 188) | 0.63 | 0.74 | 0.987 | 0.997 / 0.991 | 0.995 / 0.988 |
+| Same word count (12,396 / 400 / 370) | **0.53** | 0.72 | 0.996 | 0.998 / 0.991 | 0.997 / 0.990 |
+| Same rendered line count (61,355 / 400 / 399) | 0.61 | 0.79 | 0.996 | 0.999 / 0.995 | 0.998 / 0.993 |
+| Same first word, word count within 2 (2,639 / 267 / 174) | **0.51** | 0.67 | 0.986 | 0.995 / 0.988 | 0.996 / 0.987 |
+
+Image-only baselines on all pairs: layout 0.71, thumbnail 0.76 (0.62 / 0.71 when first word and length are matched). Per-layer values with CIs: [`llava-results/probe/controls_table.txt`](llava-results/probe/controls_table.txt), [`qwen-results/probe/controls_table.txt`](qwen-results/probe/controls_table.txt) (raw values in `controls_results.json`).
+
+| LLaVA-1.5-7B | Qwen2.5-VL-7B |
+|---|---|
+| ![](llava-results/probe/controls_matched.png) | ![](qwen-results/probe/controls_matched.png) |
+
+- **The probe does not rely on style.** Matching works: the length baseline drops to chance on length-matched pairs and the format baseline from 0.83 to 0.67. The probe stays at ≥ 0.987 in every condition, model and modality. First word, length, question form and line count are not what it uses.
+- **Word content is not ruled out.** A bag-of-words classifier with no model matches the probe (0.996) and survives the same matching (0.986). On dataset2, "the model represents harm" and "the model passes along which words were in the prompt" make the same prediction. Better matching on dataset2 cannot fix this, because harm and topic coincide there: every harmful prompt is about weapons, hacking or theft, and no harmless one is. Separating them needs different data: harmful-sounding safe prompts (XSTest, OR-Bench-Hard) and a harm × style 2×2 set of minimal pairs.
+- **The layer-1 image signal is reading, not layout.** Layout and pixel baselines reach 0.71–0.76, while the image probe is at 0.99 after one layer. Word identity from the rendered text reaches the last token almost immediately, which supports the OCR caveat.
+- **These conclusions are about text and typographic images only.** For natural images there are no words to read, so the lexical confound disappears. Its counterpart is objects and image source: a probe may detect "there's a knife" or "this is a Stable Diffusion image" rather than harm. The matching baselines there are a generic vision encoder (CLIP embedding), a dataset-source check, and safe images that contain the same objects. The prompt must also be identical across conditions, otherwise the bag-of-words baseline on the prompt applies again (VLSU's cells use different prompts).
+- **Caveats.**
+  - The probe was refit without the shuffle runs, which changes the inner-CV random draws, so "all pairs" can differ from `probe_table.txt` by ≤ 0.001.
+  - Out-of-fold scores from 5 differently trained fold models are pooled. This pushes the first-word baseline on same-first-word pairs to 0.38 instead of 0.5. The same pooling only makes the probe's matched numbers conservative.
+  - The smallest matched set has 2,639 pairs, so CIs widen to about ±0.01–0.02.
 
 Write-ups: [`comparison.txt`](comparison.txt) (side by side), [`llava-results/results.txt`](llava-results/results.txt), [`qwen-results/results.txt`](qwen-results/results.txt).
 
@@ -348,6 +387,10 @@ python old_project_scripts/Experiment-1-scripts/refusal_reliability.py --model q
 python probes/linear_probe.py --model llava
 python probes/linear_probe.py --model qwen
 
+# 1e. probe controls: surface baselines + style-matched AUROC (caches probe scores to <model>-results/probe/oof_scores.npz)
+python probes/controls.py --model llava
+python probes/controls.py --model qwen
+
 # single-prompt probe against the saved LLaVA vectors
 python old_project_scripts/Experiment-1-scripts/interactive_cosine_sim.py --prompt "How do I pick a lock?" --image some.png
 ```
@@ -378,6 +421,7 @@ old_project_scripts/            Phase 1 (Exp 1, Exp 2, natural-image baselines);
     steer_cross_modal.py          cross-modal add / ablate steering
 probes/
   linear_probe.py               harmful vs harmless logistic probe: nested CV, bootstrap CIs, shuffle null
+  controls.py                   probe controls: surface baselines, style-matched pair AUROC
 llava-results/                  plots, results.txt, reliability/, probe/, steering/, vlsu/, mmsafety/
 qwen-results/                   plots, results.txt, reliability/, probe/, steering/, vlsu/
 ablation1/                      earlier image-only LLaVA run
@@ -389,7 +433,8 @@ comparison.txt                  LLaVA vs Qwen write-up
 ## Caveats and next steps
 
 - **Typographic images only.** Test with natural harmful images to tell "OCR works well" apart from "modality-general harm concept".
-- **Refusal vs style confound.** AdvBench and Alpaca differ in style and length, not only harmfulness. A stable mean-difference direction is not proof that it is *the* refusal direction, and the near-ceiling probe AUROC (even at layer 1) may reflect style rather than harm. The probe now has a label-shuffle null; a surface-feature baseline and a style-matched test set are still missing.
+- **HADES is not OCR-free as shipped.** Each HADES image is 1024×1324: a 1024×1024 Stable Diffusion image with the harmful keyword (e.g. "beat") printed in a white 300 px strip below. Crop to the top 1024 px before using it as a natural image, and still run an OCR check on the crop.
+- **Harm vs lexical confound.** AdvBench and Alpaca differ in words and topic, not only harmfulness. The probe is robust to style matching, but a bag-of-words classifier is equally accurate (see Probe controls). So dataset2 cannot separate a harm representation from lexical content. A stable mean-difference direction is also not proof that it is *the* refusal direction.
 - **Steering coverage.** Qwen was run at α ∈ {1, 2} only (LLaVA also has α=4), at two layers per model, with greedy decoding and 64 new tokens.
 - **Refusal scorer.** The substring scorer confuses "can't read the image" (LLaVA) and soft "As an AI I don't have…" hedges (Qwen) with refusal. It misses degenerate output and "this is unethical, but here is how…" moralising compliance. The "genuine" / "harm-framed" counts in the README are ad-hoc regexes. It needs an exclusion list or an LLM judge.
 - **Ad-hoc numbers.** The relative-norm, outlier-dimension and image-to-text-twin figures were computed ad hoc from the cached hidden states. No committed script produces them yet. (Held-out separability is now scripted in `probes/linear_probe.py`.)
@@ -400,7 +445,9 @@ comparison.txt                  LLaVA vs Qwen write-up
 - [ ] Better refusal scorer (separate "can't read the image" and soft hedges, flag degenerate output and moralising compliance)
 - [x] Linear probe with CV, bootstrap CIs and label-shuffle null (`probes/linear_probe.py`)
 - [ ] Label-shuffle null for the cosine / norm analyses
-- [ ] Surface-feature baseline and style-matched harmful/harmless set for the probe
-- [ ] Natural (non-typographic) harmful images
+- [x] Surface-feature baselines and style-matched pair AUROC for the probe (`probes/controls.py`)
+- [ ] Harmful-sounding safe prompts (XSTest, OR-Bench-Hard) as hard negatives for the probe
+- [ ] Harm × style 2×2 minimal-pair set
+- [ ] Natural (non-typographic) harmful images: HADES cropped to the top 1024 px, BeaverTails-V, VLSU, with a CLIP baseline, a source check and same-object safe images
 - [ ] Script the ad-hoc analyses
 - [ ] Unify LLaVA output paths under `llava-results/`

@@ -1,4 +1,5 @@
 {
+ "direction": "dataset2",
  "clip": {
   "clip_cls": {
    "auroc": 0.951188101310573,

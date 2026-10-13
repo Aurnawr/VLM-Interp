@@ -15,10 +15,15 @@ from vlsu_data import CLIP_PATH, NEAR_DUP_COS, keep_mask, load_vlsu
 #      What is decodable before the language model sees anything. Same images -> same for both models.
 #   2. Final-token probe: read from probe_results.json written by
 #      `linear_probe.py --dataset vlsu --n_shuffle 20`.
-#   3. Projection onto the text refusal direction v_text (dataset2 harmful-text mean minus harmless-text
-#      mean, identical to the saved refusal_text.pt): AUROC of h . v_text_hat, no training. Also the share
+#   3. Projection onto a text refusal direction v_text: AUROC of h . v_text_hat, no training. Also the share
 #      of images past the text threshold (midpoint of the harmful- and harmless-text means along v_text),
-#      and the image class gap along v_text as a fraction of the text class gap.
+#      and the image class gap along v_text as a fraction of the text class gap. --direction picks v_text:
+#        dataset2 (default): dataset2 harmful-text mean minus harmless-text mean, identical to the saved
+#          refusal_text.pt. Text-only inputs, so its threshold sits in a different input format from the
+#          image states and the threshold/position columns include that format offset.
+#        vlsu: v_text_vlsu from vlsu_text_direction.py (VLSU SH vs SS, own prompts, image cancelled), with
+#          its threshold from the SH / SS means in the same image-present format. Outputs get a _vtextvlsu suffix.
+#      Only part 3 depends on the direction; parts 1 and 2 are identical across --direction.
 # CIs: stratified bootstrap over images (CLIP and probe scores are out-of-fold).
 
 INK, MUTED, GRID = "#0b0b0b", "#52514e", "#e4e3df"
@@ -54,8 +59,14 @@ def projection_stats(H1, H0, v_text, t_mid, n_boot, rng, n_random=200):
     return out
 
 
-def text_reference(model):
-    """v_text per layer and the harmful/harmless text means along v_text_hat (dataset2, prompts 0-399)."""
+def text_reference(model, direction="dataset2"):
+    """v_text per layer and the harmful/harmless text means along v_text_hat (dataset2 prompts 0-399, or VLSU SH/SS)."""
+    if direction == "vlsu":
+        d = torch.load(os.path.join(ROOT, f"{model}-results", "vlsu_probe", "refusal_text_vlsu.pt"))
+        v = d["v"].double().numpy()
+        ref = {l: {"harmful": d["harmful_mean"][l].item(), "harmless": d["harmless_mean"][l].item(),
+                   "thr": d["thr"][l].item()} for l in range(1, v.shape[0])}
+        return v, ref
     c = np.load(os.path.join(ROOT, f"{model}-results", f"hidden_states_{model}.npz"))
     Ht, H0t = c["harmful_text"].astype(np.float64), c["harmless_text"].astype(np.float64)
     v = Ht.mean(0) - H0t.mean(0)
@@ -84,11 +95,11 @@ def clip_baseline(n_boot, rng):
     return res, {"n_unsafe": int((y == 1).sum()), "n_safe": int((y == 0).sum()), "dropped": dropped}
 
 
-def plot(probe, proj, clip, model, path):
+def plot(probe, proj, clip, model, path, dir_label):
     layers = sorted(int(l) for l in proj)
     fig, ax = plt.subplots(figsize=(8.5, 4.6))
     for res, key, color, label in [(probe, "image", C_PROBE, "final-token probe (5-fold CV)"),
-                                   (proj, None, C_PROJ, "projection onto text refusal direction (no training)")]:
+                                   (proj, None, C_PROJ, f"projection onto {dir_label} (no training)")]:
         r = [(res[key] if key else res)[str(l)] for l in layers]
         ax.plot(layers, [x["auroc"] for x in r], color=color, lw=2, label=label)
         ax.fill_between(layers, [x["auroc_ci"][0] for x in r], [x["auroc_ci"][1] for x in r],
@@ -121,13 +132,17 @@ def main():
     parser.add_argument("--model", choices=sorted(MODEL_NAMES), default="llava")
     parser.add_argument("--n_boot", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--direction", choices=["dataset2", "vlsu"], default="dataset2")
     args = parser.parse_args()
+    sfx = "_vtextvlsu" if args.direction == "vlsu" else ""
+    dir_label = ("in-format VLSU text direction v_text_vlsu (SH vs SS, image cancelled)" if args.direction == "vlsu"
+                 else "text refusal direction v_text (dataset2)")
 
     out_dir = os.path.join(ROOT, f"{args.model}-results", "vlsu_probe")
     rng = np.random.default_rng(args.seed)
     clip, info = clip_baseline(args.n_boot, rng)
     H1, H0, meta = load_vlsu(args.model)
-    v_text, ref = text_reference(args.model)
+    v_text, ref = text_reference(args.model, args.direction)
     proj = projection_stats(H1.astype(np.float64), H0.astype(np.float64), v_text, ref, args.n_boot, rng)
     probe = json.load(open(os.path.join(out_dir, "probe_results.json")))["results"]
 
@@ -149,14 +164,14 @@ def main():
              f"   peak (layer {pk:2d})            {f(probe['image'][str(pk)])}   acc {probe['image'][str(pk)]['acc']:.3f}",
              f"   last layer ({L:2d})            {f(probe['image'][str(L)])}   acc {probe['image'][str(L)]['acc']:.3f}",
              f"   shuffle null 95th pct      {max(probe['image'][str(l)]['null_auroc_95'] for l in layers):.3f} (max over layers)",
-             f"3. Projection onto text refusal direction v_text (no training)",
+             f"3. Projection onto {dir_label} (no training)",
              f"   best layer ({jk:2d})           {f(proj[str(jk)])}",
              f"   last layer ({L:2d})            {f(proj[str(L)])}",
              f"   random-direction null      {max(proj[str(l)]['random_null_95'] for l in layers):.3f} "
              f"(95th pct of max(AUROC, 1-AUROC) over 200 random unit directions; max over layers)", "",
              "Per layer: probe AUROC | projection AUROC | share of unsafe / safe images past the text threshold |",
              "image class gap along v_text as a fraction of the text class gap | mean unsafe / safe image position",
-             "(0 = harmless-text mean, 1 = harmful-text mean) | projection random-direction null (95th pct) |",
+             f"(0 = harmless-text mean, 1 = harmful-text mean{', SS / SH in the same image-present format' if sfx else ''}) | projection random-direction null (95th pct) |",
              "cosine between v_text and the VLSU image class-mean difference (unsafe - safe images)",
              f"{'layer':>5}  {'probe':>22}  {'projection':>22}  {'unsafe>thr':>10}  {'safe>thr':>8}  {'gap frac':>8}  "
              f"{'unsafe pos':>10}  {'safe pos':>8}  {'rand null':>9}  {'cos(v_text, v_img)':>18}"]
@@ -166,13 +181,13 @@ def main():
                      f"{q['safe_past_text_threshold']:>8.3f}  {q['gap_frac_of_text_gap']:>8.3f}  "
                      f"{q['unsafe_mean_pos']:>10.2f}  {q['safe_mean_pos']:>8.2f}  {q['random_null_95']:>9.3f}  "
                      f"{q['cos_vtext_vimg']:>18.3f}")
-    with open(os.path.join(out_dir, "vlsu_table.txt"), "w") as fh:
+    with open(os.path.join(out_dir, f"vlsu_table{sfx}.txt"), "w") as fh:
         fh.write("\n".join(lines) + "\n")
-    with open(os.path.join(out_dir, "vlsu_results.json"), "w") as fh:
-        json.dump({"clip": clip, "projection": proj, "probe_peak_layer": pk, "projection_best_layer": jk,
+    with open(os.path.join(out_dir, f"vlsu_results{sfx}.json"), "w") as fh:
+        json.dump({"direction": args.direction, "clip": clip, "projection": proj, "probe_peak_layer": pk, "projection_best_layer": jk,
                    "n_unsafe": info["n_unsafe"], "n_safe": info["n_safe"], "near_duplicates_dropped": info["dropped"]},
                   fh, indent=1)
-    plot(probe, proj, clip, args.model, os.path.join(out_dir, "vlsu_auroc.png"))
+    plot(probe, proj, clip, args.model, os.path.join(out_dir, f"vlsu_auroc{sfx}.png"), dir_label)
     print("\n".join(lines[:16]))
     print(f"Saved to {out_dir}")
 

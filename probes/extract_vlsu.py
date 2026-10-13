@@ -8,10 +8,15 @@ from PIL import Image
 from tqdm import tqdm
 from transformers import AutoProcessor, LlavaForConditionalGeneration, Qwen2_5_VLForConditionalGeneration
 
-# Last-token hidden states for VLSU natural images under ONE shared prompt, so the text is identical
-# across classes and only the image differs (VLSU's own prompts differ between cells).
-#   harmful  = unsafe-image cells HS + HH (image_grade == "unsafe")
-#   harmless = safe-image cells   SS + SH (image_grade == "safe")
+# Last-token hidden states for VLSU natural images, in one of two prompt modes:
+#   --prompts shared (default): ONE shared prompt, so the text is identical across classes and only the
+#     image differs (VLSU's own prompts differ between cells). Written to hidden_states_vlsu.npz.
+#       harmful  = unsafe-image cells HS + HH (image_grade == "unsafe")
+#       harmless = safe-image cells   SS + SH (image_grade == "safe")
+#   --prompts own: each item with its own VLSU prompt, passed exactly as in the behavioural baseline
+#     (vlsu_baseline.py, wrapping quotes kept), so the states line up with its refusal labels.
+#     Written to hidden_states_vlsu_own.npz. label = text_grade == "unsafe". SH vs SS (safe images,
+#     harmful vs safe text) gives the in-format text direction v_text_vlsu (vlsu_text_direction.py).
 # Readout matches Experiment 1: last token, every layer (embeddings + decoder layers), batch size 1.
 # Images are capped at 672 px on the long side, as in the VLSU behavioural baseline.
 # For LLaVA, the CLIP ViT-L/14-336 features of its own (frozen) vision tower are saved as well:
@@ -33,7 +38,8 @@ def load_items(data_dir, max_side):
         for it in json.load(open(os.path.join(data_dir, f"{cell}.json"))):
             assert (it["image_grade"] == "unsafe") == bool(label), (cell, it["uuid"])
             items.append({"cell": cell, "label": label, "uuid": it["uuid"], "image": it["image"],
-                          "image_category": it["image_category"]})
+                          "image_category": it["image_category"], "prompt": it["prompt"],
+                          "text_grade": it["text_grade"], "text_category": it["text_category"]})
     for it in items:
         img = Image.open(os.path.join(data_dir, it["image"])).convert("RGB")
         img.thumbnail((max_side, max_side), Image.BICUBIC)
@@ -41,11 +47,11 @@ def load_items(data_dir, max_side):
     return items
 
 
-def fmt(model_name, processor):
+def fmt(model_name, processor, prompt=PROMPT):
     if model_name == "llava":
-        return f"USER: <image>\n{PROMPT}\nASSISTANT:"
+        return f"USER: <image>\n{prompt}\nASSISTANT:"
     return processor.apply_chat_template(
-        [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": PROMPT}]}],
+        [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": prompt}]}],
         tokenize=False, add_generation_prompt=True)
 
 
@@ -58,6 +64,7 @@ def main():
     parser.add_argument("--model", choices=sorted(MODELS), default="llava")
     parser.add_argument("--data", default=os.path.join(ROOT, "dataset_vlsu"))
     parser.add_argument("--max_side", type=int, default=672)
+    parser.add_argument("--prompts", choices=["shared", "own"], default="shared")
     parser.add_argument("--gpu_mem", default="8GiB", help="GPU budget; the rest is offloaded to CPU")
     args = parser.parse_args()
 
@@ -72,14 +79,18 @@ def main():
     device = model.device
 
     items = load_items(args.data, args.max_side)
-    text = fmt(args.model, processor)
+    own = args.prompts == "own"
+    if own:
+        for it in items:
+            it["label"] = int(it["text_grade"] == "unsafe")
     states, clip_cls, clip_patch = [], [], []
-    for it in tqdm(items, desc=f"{args.model} VLSU"):
+    for it in tqdm(items, desc=f"{args.model} VLSU ({args.prompts} prompts)"):
+        text = fmt(args.model, processor, it["prompt"] if own else PROMPT)
         inputs = processor(text=[text], images=[it["pil"]], return_tensors="pt").to(device)
         with torch.no_grad():
             out = model(**inputs, output_hidden_states=True)
             states.append(np.stack([hs[0, -1].float().cpu().numpy() for hs in out.hidden_states]))
-            if args.model == "llava":
+            if args.model == "llava" and not own:
                 vt = vision_tower(model)
                 v = vt(inputs["pixel_values"].to(vt.device, vt.dtype), output_hidden_states=True)
                 clip_cls.append(v.pooler_output[0].float().cpu().numpy())
@@ -87,12 +98,14 @@ def main():
 
     states = np.array(states, dtype=np.float32)
     y = np.array([it["label"] for it in items])
-    meta = {k: np.array([it[k] for it in items]) for k in ["cell", "uuid", "image", "image_category"]}
-    np.savez(os.path.join(out_dir, "hidden_states_vlsu.npz"), states=states, label=y, **meta)
+    keys = ["cell", "uuid", "image", "image_category"] + (["prompt", "text_category"] if own else [])
+    meta = {k: np.array([it[k] for it in items]) for k in keys}
+    np.savez(os.path.join(out_dir, "hidden_states_vlsu_own.npz" if own else "hidden_states_vlsu.npz"),
+             states=states, label=y, **meta)
     if clip_cls:
         np.savez(os.path.join(out_dir, "clip_vlsu.npz"), clip_cls=np.array(clip_cls), clip_patch=np.array(clip_patch),
                  label=y, **meta)
-    print(f"Saved {states.shape} to {out_dir}  (prompt: {PROMPT!r})")
+    print(f"Saved {states.shape} to {out_dir}  (prompts: {'own VLSU prompts' if own else repr(PROMPT)})")
 
 
 if __name__ == "__main__":

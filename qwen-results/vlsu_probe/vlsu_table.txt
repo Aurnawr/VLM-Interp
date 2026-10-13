@@ -9,7 +9,7 @@ AUROC [95% CI], stratified bootstrap over images
    peak (layer 28)            0.955 [0.941, 0.967]   acc 0.891
    last layer (28)            0.955 [0.941, 0.967]   acc 0.891
    shuffle null 95th pct      0.555 (max over layers)
-3. Projection onto text refusal direction v_text (no training)
+3. Projection onto text refusal direction v_text (dataset2) (no training)
    best layer (20)           0.874 [0.850, 0.898]
    last layer (28)            0.843 [0.815, 0.869]
    random-direction null      0.844 (95th pct of max(AUROC, 1-AUROC) over 200 random unit directions; max over layers)
